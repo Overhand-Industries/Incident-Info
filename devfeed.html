@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FirelineOS — Public Feed Embed (Firestore)</title>
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="FirelineOS — Live Update">
+<meta property="og:description" content="Latest published incident information.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0b0d12; --panel:#0f141c; --text:#e6edf3; --muted:#9fb0c9;
+    --accent:#4cc38a; --border:#1f2633; --badge:#0b1320; --badge-border:#2b3b52;
+    --chip:#0b1320; --chip-border:#2b3b52; --chip-active:#14321f; --chip-active-border:#22553a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter}
+  .wrap{max-width:860px;margin:0 auto;padding:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .hdr{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .title{font-weight:700;font-size:18px;margin:0}
+  .badge{padding:2px 8px;border-radius:999px;border:1px solid var(--badge-border);background:var(--badge);color:#cfe3ff;font-size:12px;white-space:nowrap}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px;margin:8px 0}
+  .body{margin-top:6px}
+  .body p{margin:0 0 8px 0}
+  img.media{max-width:100%;height:auto;border-radius:10px;margin-top:8px;border:1px solid var(--border)}
+  .hint{color:var(--muted);text-align:center;margin-top:18px}
+  /* Legend */
+  .legendWrap{margin:0 0 10px 0}
+  .legendTitle{font-size:12px;color:var(--muted);margin:0 0 6px 2px}
+  .legend{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px; border:1px solid var(--chip-border); background:var(--chip); color:#cfe3ff; font-size:13px}
+  .chip[data-active="true"]{background:var(--chip-active); border-color:var(--chip-active-border); color:#d5ffe7}
+  .chip:focus-visible{outline:2px solid var(--accent)}
+  .auth{font-size:12px;color:var(--muted);text-align:right;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="auth" id="authInfo">…</div>
+  <div class="legendWrap">
+    <div class="legendTitle">Active incidents</div>
+    <div id="legend" class="legend"></div>
+  </div>
+  <div id="container" class="card">
+    <div class="hint">Loading live update…</div>
+  </div>
+</div>
+
+<!-- Firebase SDKs (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+(function(){
+  // ---- Config ----
+  // Paste your project's config here
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT",
+    appId: "YOUR_APP_ID"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // ---- Helpers ----
+  const root = document.getElementById('container');
+  const legendEl = document.getElementById('legend');
+  const authInfo = document.getElementById('authInfo');
+
+  function qs(key){ const u=new URL(location.href); return u.searchParams.get(key); }
+  function fmt(iso){ try{return new Date(iso).toLocaleString()}catch(e){return ''} }
+
+  // Selection persistence to keep embed steady per origin/tab
+  const SEL_KEY = 'flos_embed_selected_incident_firestore';
+  function getSavedSelection(){ try{ return sessionStorage.getItem(SEL_KEY) || null }catch(e){ return null } }
+  function setSavedSelection(id){ try{ sessionStorage.setItem(SEL_KEY, id||'') }catch(e){} }
+
+  // State
+  let incidents = []; // full incident docs
+  let currentIncidentId = null;
+  let unsubReleases = null;
+
+  // Renderers
+  function renderEmpty(){ root.innerHTML = '<div class="hint">No live post yet.</div>'; }
+
+  function renderPost(post, incidentName){
+    const evac = post.evac ? `<span class="badge">🚨 ${post.evac}</span>` : '';
+    const img  = post.image ? `<img class="media" src="${post.image}" alt="">` : '';
+    root.innerHTML = `
+      <div class="hdr">
+        <h1 class="title">${post.title||'(Untitled)'}</h1>
+        <span class="badge">PUBLISHED</span>
+      </div>
+      <div class="meta">
+        <span class="badge">🕒 ${fmt(post.published_at||post.created_at)}</span>
+        ${post.signer ? `<span class="badge">✅ ${post.signer}</span>` : ''}
+        ${evac}
+        ${incidentName ? `<span class="badge">🔥 ${incidentName}</span>`: ''}
+      </div>
+      <div class="body">${(post.body||'').replace(/\n/g,'<br>')}</div>
+      ${img}
+    `;
+    try{
+      if(post.image){
+        let og = document.querySelector('meta[property="og:image"]');
+        if(!og){ og=document.createElement('meta'); og.setAttribute('property','og:image'); document.head.appendChild(og); }
+        og.setAttribute('content', post.image);
+      }
+    }catch(e){}
+  }
+
+  function renderLegend(){
+    const active = incidents.filter(i => String(i.status||'').toUpperCase() === 'ACTIVE');
+    legendEl.innerHTML = '';
+    if(!active.length){ legendEl.innerHTML = '<div class="hint" style="width:100%">No active incidents</div>'; return; }
+    active.forEach(inc=>{
+      const chip = document.createElement('button');
+      chip.className = 'chip';
+      chip.setAttribute('data-active', inc.id===currentIncidentId);
+      chip.title = inc.number||'';
+      chip.textContent = inc.name;
+      chip.addEventListener('click', ()=>{
+        setIncident(inc.id, /*pushUrl=*/true);
+      });
+      legendEl.appendChild(chip);
+    });
+  }
+
+  function setIncident(id, pushUrl){
+    currentIncidentId = id;
+    setSavedSelection(id);
+    if(pushUrl){
+      try{ const url = new URL(location.href); url.searchParams.set('incident', id); history.replaceState(null,'',url.toString()); }catch(e){}
+    }
+    watchLatestPublished();
+    renderLegend();
+  }
+
+  // Live listener for latest published of selected incident
+  function watchLatestPublished(){
+    if(unsubReleases) { unsubReleases(); unsubReleases=null; }
+    if(!currentIncidentId){ renderEmpty(); return; }
+    root.innerHTML = '<div class="hint">Loading live update…</div>';
+    const inc = incidents.find(x=>x.id===currentIncidentId);
+    unsubReleases = db.collection('releases')
+      .where('incident_id','==', currentIncidentId)
+      .where('status','==','PUBLISHED')
+      .orderBy('published_at','desc')
+      .limit(1)
+      .onSnapshot(snap=>{
+        if(snap.empty){ renderEmpty(); return; }
+        const post = snap.docs[0].data();
+        renderPost(post, inc?inc.name:null);
+      }, err=>{
+        root.innerHTML = `<div class="hint">Failed to load: ${err.message}</div>`;
+      });
+  }
+
+  function pickInitialIncident(){
+    const active = incidents.filter(i => String(i.status||'').toUpperCase() === 'ACTIVE');
+    if(!active.length) return null;
+    const byUrl = qs('incident'); if(byUrl){ const m = active.find(i=>i.id===byUrl); if(m) return m.id; }
+    const saved = getSavedSelection(); if(saved){ const m = active.find(i=>i.id===saved); if(m) return m.id; }
+    return active[0].id;
+  }
+
+  // Start: auth, then listen to incidents
+  auth.signInAnonymously().then(({user})=>{
+    authInfo.textContent = `Signed in (anon) — ${user.uid.slice(0,8)}…`;
+
+    db.collection('incidents')
+      .orderBy('created_at','desc')
+      .onSnapshot(snap=>{
+        incidents = []; snap.forEach(d=>incidents.push(d.data()));
+        if(!currentIncidentId){
+          const first = pickInitialIncident();
+          if(first){ setIncident(first, false); } else { renderLegend(); renderEmpty(); }
+        } else {
+          // If current selection becomes inactive or deleted, re-pick
+          const stillActive = incidents.find(i=>i.id===currentIncidentId && String(i.status||'').toUpperCase()==='ACTIVE');
+          if(!stillActive){ const next = pickInitialIncident(); setIncident(next, false); }
+          else { renderLegend(); }
+        }
+      }, err=>{
+        root.innerHTML = `<div class=\"hint\">Failed to load incidents: ${err.message}</div>`;
+      });
+
+  }).catch(e=>{
+    authInfo.textContent = 'Auth failed';
+    root.innerHTML = `<div class=\"hint\">Authentication error: ${e.message}</div>`;
+  });
+})();
+</script>
+</body>
+</html>
