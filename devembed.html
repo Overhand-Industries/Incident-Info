@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FirelineOS — Public Feed Embed</title>
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="FirelineOS — Live Update">
+<meta property="og:description" content="Latest published incident information.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0b0d12; --panel:#0f141c; --text:#e6edf3; --muted:#9fb0c9;
+    --accent:#4cc38a; --border:#1f2633; --badge:#0b1320; --badge-border:#2b3b52;
+    --chip:#0b1320; --chip-border:#2b3b52; --chip-active:#14321f; --chip-active-border:#22553a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter}
+  .wrap{max-width:860px;margin:0 auto;padding:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .hdr{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .title{font-weight:700;font-size:18px;margin:0}
+  .badge{padding:2px 8px;border-radius:999px;border:1px solid var(--badge-border);background:var(--badge);color:#cfe3ff;font-size:12px;white-space:nowrap}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px;margin:8px 0}
+  .body{margin-top:6px}
+  .body p{margin:0 0 8px 0}
+  img.media{max-width:100%;height:auto;border-radius:10px;margin-top:8px;border:1px solid var(--border)}
+  .hint{color:var(--muted);text-align:center;margin-top:18px}
+  /* Legend */
+  .legendWrap{margin:0 0 10px 0}
+  .legendTitle{font-size:12px;color:var(--muted);margin:0 0 6px 2px}
+  .legend{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px; border:1px solid var(--chip-border); background:var(--chip); color:#cfe3ff; font-size:13px}
+  .chip[data-active="true"]{background:var(--chip-active); border-color:var(--chip-active-border); color:#d5ffe7}
+  .chip:focus-visible{outline:2px solid var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="legendWrap">
+    <div class="legendTitle">Active incidents</div>
+    <div id="legend" class="legend"></div>
+  </div>
+  <div id="container" class="card">
+    <div class="hint">Loading live update…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function qs(key){ const u=new URL(location.href); return u.searchParams.get(key); }
+  const STORAGE_KEY = qs('key') || 'firelineos.single.live.v19';
+  const URL_INCIDENT = qs('incident');
+
+  function fmt(iso){ try{return new Date(iso).toLocaleString()}catch(e){return ''} }
+  function getDB(){
+    try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {incidents:[],releases:[]} }
+    catch(e){ return {incidents:[],releases:[]} }
+  }
+
+  // ——— Incident selection state (persist lightly so embeds remember choice per-origin) ———
+  const SEL_KEY = 'flos_embed_selected_incident_'+STORAGE_KEY;
+  function getSavedSelection(){ try{ return sessionStorage.getItem(SEL_KEY) || null }catch(e){ return null } }
+  function setSavedSelection(id){ try{ sessionStorage.setItem(SEL_KEY, id||'') }catch(e){} }
+
+  function activeIncidents(db){ return (db.incidents||[]).filter(i=> String(i.status||'').toUpperCase() === 'ACTIVE'); }
+
+  function pickIncidentId(db){
+    const actives = activeIncidents(db);
+    if(!actives.length) return null;
+    // Priority: explicit URL (but only if ACTIVE), else last session selection (if still ACTIVE), else first ACTIVE
+    if(URL_INCIDENT){ const m = actives.find(i=>i.id===URL_INCIDENT); if(m) return m.id; }
+    const saved = getSavedSelection(); if(saved){ const m = actives.find(i=>i.id===saved); if(m) return m.id; }
+    return actives[0].id;
+  }
+
+  function latestPublished(db, incidentId){
+    const items = (db.releases||[]).filter(r=>r.incident_id===incidentId && r.status==='PUBLISHED');
+    if(!items.length) return null;
+    items.sort((a,b)=> new Date(b.published_at||b.created_at) - new Date(a.published_at||a.created_at));
+    return items[0];
+  }
+
+  function renderEmpty(el){ el.innerHTML = '<div class="hint">No live post yet.</div>'; }
+
+  function renderPost(el, post, incidentName){
+    const evac = post.evac ? `<span class="badge">🚨 ${post.evac}</span>` : '';
+    const img  = post.image ? `<img class="media" src="${post.image}" alt="">` : '';
+    el.innerHTML = `
+      <div class="hdr">
+        <h1 class="title">${post.title||'(Untitled)'}</h1>
+        <span class="badge">PUBLISHED</span>
+      </div>
+      <div class="meta">
+        <span class="badge">🕒 ${fmt(post.published_at||post.created_at)}</span>
+        ${post.signer ? `<span class="badge">✅ ${post.signer}</span>` : ''}
+        ${evac}
+        ${incidentName ? `<span class="badge">🔥 ${incidentName}</span>`: ''}
+      </div>
+      <div class="body">${(post.body||'').replace(/\n/g,'<br>')}</div>
+      ${img}
+    `;
+    // Update Open Graph image dynamically (best-effort for social link previews)
+    try{
+      if(post.image){
+        let og = document.querySelector('meta[property="og:image"]');
+        if(!og){ og=document.createElement('meta'); og.setAttribute('property','og:image'); document.head.appendChild(og); }
+        og.setAttribute('content', post.image);
+      }
+    }catch(e){}
+  }
+
+  const root = document.getElementById('container');
+  const legendEl = document.getElementById('legend');
+
+  function renderLegend(db, selectedId){
+    const list = activeIncidents(db);
+    legendEl.innerHTML = '';
+    if(!list.length){ legendEl.innerHTML = '<div class="hint" style="width:100%">No active incidents</div>'; return; }
+    list.forEach(inc=>{
+      const chip = document.createElement('button');
+      chip.className = 'chip';
+      chip.setAttribute('data-active', inc.id===selectedId);
+      chip.title = inc.number||'';
+      chip.textContent = inc.name;
+      chip.addEventListener('click', ()=>{
+        setSavedSelection(inc.id);
+        // Update URL param incident (without reload)
+        try{
+          const url = new URL(location.href);
+          url.searchParams.set('incident', inc.id);
+          history.replaceState(null, '', url.toString());
+        }catch(e){}
+        refresh();
+      });
+      legendEl.appendChild(chip);
+    });
+  }
+
+  function refresh(){
+    const db = getDB();
+    const incidentId = pickIncidentId(db);
+    renderLegend(db, incidentId);
+    if(!incidentId){ root.innerHTML = '<div class="hint">No active incidents to display.</div>'; return; }
+    const inc = (db.incidents||[]).find(x=>x.id===incidentId) || null;
+    const post = latestPublished(db, incidentId);
+    if(!post){ renderEmpty(root); return; }
+    renderPost(root, post, inc?inc.name:null);
+  }
+
+  // Initial render
+  refresh();
+
+  // Live updates when parent app changes localStorage
+  window.addEventListener('storage', (e)=>{ if(e.key===STORAGE_KEY){ refresh(); } });
+
+  // Poll fallback for embeds where storage event may not propagate (e.g., same-tab)
+  let last = localStorage.getItem(STORAGE_KEY);
+  setInterval(()=>{
+    const cur = localStorage.getItem(STORAGE_KEY);
+    if(cur !== last){ last = cur; refresh(); }
+  }, 2500);
+})();
+</script>
+</body>
+</html>
