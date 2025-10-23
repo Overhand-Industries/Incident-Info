@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FirelineOS — Single File (v19 — Remove Attachment + Incident Manager)</title>
+<style>
+  :root { --bg:#0b0d12; --panel:#11141b; --muted:#8892a6; --text:#e6edf3; --accent:#4cc38a; --warn:#ffb224; --pub:#4cc38a; --app:#5eb0ff; --drf:#c8a4ff; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter}
+  header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#0d1117;border-bottom:1px solid #1f2633}
+  header h1{font-size:16px;margin:0}
+  main{display:grid;grid-template-columns:320px 1fr 420px;gap:12px;padding:12px}
+  .panel{background:var(--panel);border:1px solid #1f2633;border-radius:10px;padding:12px}
+  label{display:block;margin:8px 0 4px;color:#c8d1e6}
+  input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #263043;background:#0b0f16;color:#e6edf3}
+  textarea{resize:vertical;min-height:120px}
+  button{cursor:pointer;border:1px solid #2a3446;background:#182030;color:#cfe3ff;border-radius:8px;padding:8px 12px}
+  button.primary{background:#14321f;border-color:#22553a;color:#d5ffe7}
+  button.danger{background:#3a1014;border-color:#70242b;color:#ffd5d8}
+  button.ghost{background:transparent;border-color:#2a3446;color:#9fb5d6}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .hint{color:var(--muted);font-size:12px}
+  .card{border:1px solid #263043;border-radius:10px;padding:10px;margin:8px 0;background:#0c121a}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;color:#a3b0c8;font-size:12px}
+  .badge{padding:3px 8px;border-radius:999px;border:1px solid #2b3b52;background:#0b1320;color:#b9c7e3;font-size:12px}
+  .status{font-weight:600}
+  .status.draft{color:var(--drf)} .status.approved{color:var(--app)} .status.published{color:#4cc38a}
+  .mapph{height:160px;border-radius:10px;border:1px dashed #2a3446;display:grid;place-items:center;color:#7e8aa4;margin-top:8px}
+  .divider{height:1px;background:#1f2633;margin:12px 0}
+  /* Incident Manager modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+  .modal{width:min(900px,96vw);background:#0b0f16;border:1px solid #263043;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+  .modal header{display:flex;align-items:center;justify-content:space-between;background:#0d1219;border-bottom:1px solid #1f2633;padding:10px 12px;border-radius:12px 12px 0 0}
+  .modal header h4{margin:0;font-size:14px}
+  .modal .content{padding:12px}
+  .table{width:100%;border-collapse:collapse}
+  .table th,.table td{border-bottom:1px solid #1f2633;padding:8px;text-align:left;font-size:13px}
+  .pill{padding:2px 8px;border:1px solid #2b3b52;border-radius:999px;background:#0b1320}
+  .row-actions{display:flex;gap:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>FirelineOS — Single File</h1>
+</header>
+
+<main>
+  <!-- Left: Incidents -->
+  <section class="panel">
+    <h3>Incidents</h3>
+    <div class="row">
+      <input id="incidentSearch" placeholder="Search incidents…">
+      <button id="newIncident">+ New</button>
+      <button id="manageIncidents" class="ghost">Manage</button>
+    </div>
+    <div id="incidentList"></div>
+    <div class="divider"></div>
+    <div class="hint">Local-only prototype. Data is stored in your browser.</div>
+  </section>
+
+  <!-- Center: Editor + Single Preview -->
+  <section class="panel">
+    <h3>Release Editor</h3>
+    <div class="row">
+      <label style="flex:1">
+        Role
+        <select id="role">
+          <option>Lead PIO</option>
+          <option>Deputy PIO</option>
+          <option>Field PIO</option>
+          <option>Public Desk</option>
+        </select>
+      </label>
+      <label style="flex:1">
+        Template
+        <select id="template">
+          <option>Daily Update</option>
+          <option>Evacuation Notice</option>
+          <option>Media Release</option>
+        </select>
+      </label>
+    </div>
+    <label>Title</label><input id="title" placeholder="Evening Update (1900)">
+    <label>Body</label><textarea id="body" placeholder="Key messages, acreage, containment, operations, weather…"></textarea>
+    <div class="row">
+      <label>Lat <input id="lat" type="number" step="any" placeholder="48.59"></label>
+      <label>Lon <input id="lon" type="number" step="any" placeholder="-120.51"></label>
+    </div>
+    <div class="row" style="align-items:end">
+      <label style="flex:1">
+        Evacuation Level
+        <select id="evac">
+          <option value="">None</option>
+          <option>Level 1 – Be Ready</option>
+          <option>Level 2 – Be Set</option>
+          <option>Level 3 – Go Now</option>
+        </select>
+      </label>
+      <div style="flex:1">
+        <label>Attach Image</label>
+        <input id="image" type="file" accept="image/*">
+        <div class="row" style="margin-top:6px">
+          <button id="removeImage" class="ghost" disabled>Remove Attachment</button>
+        </div>
+        <div id="imageInfo" class="hint"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="saveDraft">Save Draft</button>
+      <button id="approve">Approve</button>
+      <button class="primary" id="publish" disabled>Publish (Requires Approved)</button>
+      <span id="statusMsg" class="hint"></span>
+    </div>
+
+    <div class="divider"></div>
+    <h4>Preview</h4>
+    <div class="row">
+      <label style="flex:1">
+        Preview As
+        <select id="previewStatus">
+          <option>DRAFT</option>
+          <option>APPROVED</option>
+          <option>PUBLISHED</option>
+        </select>
+      </label>
+    </div>
+    <div id="previewCard" class="card"></div>
+
+    <div class="mapph">Map placeholder</div>
+  </section>
+
+  <!-- Right: Public Feed -->
+  <section class="panel">
+    <h3>Public Feed</h3>
+    <div class="row">
+      <label style="flex:1">
+        Filter
+        <select id="filterStatus">
+          <option value="">Live (Published latest only)</option>
+          <option>DRAFT</option>
+          <option>APPROVED</option>
+          <option>PUBLISHED</option>
+        </select>
+      </label>
+    </div>
+    <div id="feed"></div>
+    <div class="row">
+      <button id="unpublish" disabled>Unpublish Live</button>
+      <button id="deleteAll" class="danger" disabled>Delete All Versions</button>
+    </div>
+    <div class="hint">Unpublish reverts the most recent Published post back to APPROVED. You can edit and re-approve, or republish as-is.</div>
+  </section>
+</main>
+
+<!-- Incident Manager Modal -->
+<div id="managerBackdrop" class="modal-backdrop">
+  <div class="modal">
+    <header>
+      <h4>Incident Manager</h4>
+      <div class="row">
+        <button id="addIncidentInMgr">+ Add</button>
+        <button id="closeMgr" class="ghost">Close</button>
+      </div>
+    </header>
+    <div class="content">
+      <div class="row" style="margin-bottom:8px">
+        <input id="mgrSearch" placeholder="Filter incidents by name or number…">
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:34%">Name</th>
+            <th style="width:22%">Number</th>
+            <th style="width:16%">Status</th>
+            <th style="width:28%">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="mgrTable"></tbody>
+      </table>
+      <div class="hint" id="mgrHint"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// === Base: v18 logic ===
+const db={key:'firelineos.single.live.v19',data:{incidents:[],releases:[]},load(){try{this.data=JSON.parse(localStorage.getItem(this.key))||this.data}catch(e){}},save(){try{localStorage.setItem(this.key,JSON.stringify(this.data))}catch(e){throw e}}};
+db.load();
+const $=q=>document.querySelector(q);
+const uid=p=>p+'_'+Math.random().toString(36).slice(2,9);
+const nowISO=()=>new Date().toISOString();
+const fmt=(iso)=> new Date(iso).toLocaleString();
+let currentIncident=null,imgData=null,imageLoading=false;
+// Per-incident publish gate
+const gate = new Map(); // id -> { canPublish:false, lastApprovedAt:null }
+function g(id){ if(!gate.has(id)) gate.set(id,{canPublish:false,lastApprovedAt:null}); return gate.get(id); }
+
+function roleCanApprove(role){ return /^(lead|deputy)\s*pio\b/i.test((role||'').trim()); }
+
+if(db.data.incidents.length===0){
+  const inc={id:uid('inc'),name:"Example Complex 2025",number:"EX-0001",status:"ACTIVE",created_at:nowISO()};
+  db.data.incidents.push(inc);try{db.save();}catch(e){}currentIncident=inc;
+}else{currentIncident=db.data.incidents[0];}
+const incidentList=$("#incidentList"),incidentSearch=$("#incidentSearch"),feed=$("#feed");
+const roleEl=$("#role"),approveBtn=$("#approve"),publishBtn=$("#publish"),statusMsg=$("#statusMsg");
+const previewCard=$("#previewCard"),previewStatus=$("#previewStatus"),filterStatus=$("#filterStatus");
+const unpublishBtn=$("#unpublish"),deleteAllBtn=$("#deleteAll"), removeImageBtn=$("#removeImage"), imageInput=$("#image"), imageInfo=$("#imageInfo");
+
+// === Incident Manager refs ===
+const managerBackdrop=$("#managerBackdrop");
+const mgrTable=$("#mgrTable");
+const mgrSearch=$("#mgrSearch");
+const closeMgrBtn=$("#closeMgr");
+const addIncidentInMgrBtn=$("#addIncidentInMgr");
+
+function renderIncidents(){
+  const q=(incidentSearch.value||'').toLowerCase();
+  incidentList.innerHTML='';
+  db.data.incidents
+    .filter(i=>!q||i.name.toLowerCase().includes(q)||i.number.toLowerCase().includes(q))
+    .forEach(i=>{
+      const d=document.createElement('div');d.className='card';d.style.cursor='pointer';
+      const statusBadge = `<span class="badge">${i.status}</span>`;
+      d.innerHTML=`<div class="meta" style="justify-content:space-between"><b>${i.name}</b>${statusBadge}</div><small>${i.number}</small>`;
+      if(currentIncident&&currentIncident.id===i.id){d.style.outline='1px solid #2a7'}
+      d.onclick=()=>{currentIncident=i;g(i.id).canPublish=false;imgData=null;refreshAll();};
+      incidentList.appendChild(d);
+    });
+}
+incidentSearch.oninput=renderIncidents;
+$("#newIncident").onclick=()=>{
+  const name=prompt("Incident name");if(!name)return;
+  const i={id:uid('inc'),name,number:'EX-'+Date.now(),status:'ACTIVE',created_at:nowISO()};
+  db.data.incidents.unshift(i);try{db.save();}catch(e){}currentIncident=i;g(i.id).canPublish=false;imgData=null;refreshAll();
+};
+
+function latestApproved(){
+  return db.data.releases
+    .filter(r=>r.incident_id===currentIncident?.id && r.status==='APPROVED')
+    .sort((a,b)=> new Date(b.created_at)-new Date(a.created_at))[0] || null;
+}
+function getLatestPublished(){
+  if(!currentIncident)return null;
+  return db.data.releases.filter(r=>r.incident_id===currentIncident.id&&r.status==='PUBLISHED')
+    .sort((a,b)=>new Date(b.published_at||b.created_at)-new Date(a.published_at||a.created_at))[0]||null;
+}
+
+function updateRoleControls(){
+  const canApprove = roleCanApprove(roleEl.value) && !imageLoading;
+  approveBtn.disabled = !canApprove;
+  approveBtn.title = imageLoading ? "Please wait—image is still processing" : (canApprove ? "" : "Only Lead/Deputy can approve");
+  unpublishBtn.disabled = !roleCanApprove(roleEl.value) || !getLatestPublished();
+  deleteAllBtn.disabled = !roleCanApprove(roleEl.value) || !currentIncident || !db.data.releases.some(r=>r.incident_id===currentIncident.id);
+  removeImageBtn.disabled = imageLoading || !imgData;
+  removeImageBtn.title = imageLoading ? "Please wait—image is still processing" : (!imgData ? "No attachment to remove" : "Remove the attached image");
+}
+
+function updatePublishAvailability(){
+  if(!currentIncident){publishBtn.disabled=true;return;}
+  const hasApproved = !!latestApproved();
+  const canPub = g(currentIncident.id).canPublish;
+  publishBtn.disabled = !(hasApproved && canPub);
+  publishBtn.title = publishBtn.disabled ? "Publish requires approval after the latest changes" : "";
+}
+
+// Edits → require re-approval
+function markEdited(msg){
+  if(!currentIncident) return;
+  g(currentIncident.id).canPublish = false;
+  statusMsg.textContent = msg || "Changes detected — approval required";
+  updateRoleControls();
+  updatePublishAvailability();
+  renderPreview(); renderFeed();
+}
+
+// Image COMPRESSION
+async function compressImageToDataURL(file, maxDim=1600, quality=0.8){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      let {width, height} = img;
+      const scale = Math.min(1, maxDim/Math.max(width,height));
+      width = Math.round(width*scale); height = Math.round(height*scale);
+      const canvas = document.createElement('canvas');
+      canvas.width=width; canvas.height=height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img,0,0,width,height);
+      try{
+        const dataURL = canvas.toDataURL('image/jpeg', quality);
+        URL.revokeObjectURL(url);
+        resolve(dataURL);
+      }catch(e){ URL.revokeObjectURL(url); reject(e); }
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+    img.src = url;
+  });
+}
+
+// Inputs
+imageInput.addEventListener('change', async e=>{
+  const f=e.target.files?.[0];if(!f)return;
+  imageLoading=true; updateRoleControls();
+  statusMsg.textContent="Processing image…";
+  try{
+    const dataURL = await compressImageToDataURL(f, 1600, 0.8);
+    imgData = dataURL;
+    imageInfo.textContent = "Attachment ready";
+    imageLoading=false;
+    markEdited("Image ready — approval required");
+  }catch(err){
+    imageLoading=false;
+    statusMsg.textContent="Image processing failed";
+    updateRoleControls();
+  }
+});
+
+removeImageBtn.addEventListener('click', ()=>{
+  if(imageLoading) return;
+  if(!imgData) return;
+  imgData = null;
+  imageInput.value = "";
+  imageInfo.textContent = "Attachment removed";
+  markEdited("Attachment removed — approval required");
+});
+
+["title","body","lat","lon"].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>markEdited());
+});
+["evac","template"].forEach(id=>{
+  document.getElementById(id).addEventListener('change',()=>markEdited());
+});
+
+function editorSnapshot(status){
+  return {id:uid('rel'),incident_id:currentIncident.id,template:$("#template").value,
+    title:$("#title").value||"(Untitled)",body:$("#body").value||"",status,
+    created_at:nowISO(),published_at:status==="PUBLISHED"?nowISO():null,
+    is_official:status==="PUBLISHED",signer:status==="PUBLISHED"?(roleEl.value.trim()+" (Simulated)") : null,
+    point:{type:'Point',coordinates:[Number($("#lon").value||0),Number($("#lat").value||0)]},
+    evac:$("#evac").value,image:imgData};
+}
+
+function safeSave(){
+  try{ db.save(); return true; }catch(e){
+    console.warn(e);
+    statusMsg.textContent="Storage full — reduce image size or remove older releases";
+    return false;
+  }
+}
+
+// Actions
+$("#saveDraft").onclick=()=>{
+  if(!currentIncident){alert("Select/create an incident");return;}
+  const r=editorSnapshot('DRAFT');db.data.releases.unshift(r); if(!safeSave()) return;
+  statusMsg.textContent="Draft saved.";refreshAll();
+};
+
+$("#approve").onclick=()=>{
+  if(!roleCanApprove(roleEl.value) || !currentIncident || imageLoading){return;}
+  const r=editorSnapshot('APPROVED');db.data.releases.unshift(r); if(!safeSave()) return;
+  const s=g(currentIncident.id);
+  s.canPublish = true;
+  s.lastApprovedAt = r.created_at;
+  statusMsg.textContent="Approved. Publish is now available.";
+  updatePublishAvailability();
+  renderFeed();renderPreview();
+};
+
+$("#publish").onclick=()=>{
+  if(!currentIncident){return;}
+  updatePublishAvailability();
+  if(publishBtn.disabled){return;}
+  const la = latestApproved();
+  if(!la){statusMsg.textContent="No approved release to publish.";return;}
+  const pub={...la,id:uid('rel'),status:'PUBLISHED',published_at:nowISO(),is_official:true,signer:roleEl.value.trim()+" (Simulated)"};
+  db.data.releases.unshift(pub); if(!safeSave()) return;
+  statusMsg.textContent="Published live.";
+  renderFeed(); updatePublishAvailability();
+};
+
+$("#unpublish").onclick=()=>{
+  if(!roleCanApprove(roleEl.value))return;
+  const latestPub=getLatestPublished();if(!latestPub){statusMsg.textContent="No live post to unpublish.";return;}
+  const idx=db.data.releases.findIndex(r=>r.id===latestPub.id);
+  if(idx>-1){
+    db.data.releases[idx].status='APPROVED';
+    db.data.releases[idx].is_official=false;
+    db.data.releases[idx].published_at=null;
+    db.data.releases[idx].signer=null;
+    db.data.releases[idx].created_at=nowISO();
+    if(!safeSave()) return;
+    const s=g(currentIncident.id);
+    s.canPublish=true; // may republish immediately
+    statusMsg.textContent="Live post unpublished. You can republish now, or edit and re-approve.";
+    renderFeed(); updatePublishAvailability(); updateRoleControls();
+  }
+};
+
+$("#deleteAll").onclick=()=>{
+  if(!roleCanApprove(roleEl.value))return;
+  if(!confirm("Delete ALL releases for this incident?"))return;
+  db.data.releases=db.data.releases.filter(r=>r.incident_id!==currentIncident.id); if(!safeSave()) return;
+  const s=g(currentIncident.id); s.canPublish=false; s.lastApprovedAt=null;
+  statusMsg.textContent="All versions deleted.";renderFeed();updatePublishAvailability();
+};
+
+function renderPreview(){
+  const stSel=$("#previewStatus").value;const snap=editorSnapshot(stSel);
+  const cls=stSel==='DRAFT'?'draft':(stSel==='APPROVED'?'approved':'published');
+  const sig=snap.is_official?`<span class="badge">✅ Verified — ${snap.signer}</span>`:`<span class="badge">Unverified</span>`;
+  const evac=snap.evac?`<span class="badge" style="border-color:#704f1e;color:#ffd28a;background:#231a0d">🚨 ${snap.evac}</span>`:'';
+  previewCard.innerHTML=`<div class="meta" style="justify-content:space-between"><b>${snap.title}</b><span class="status ${cls}">${stSel}</span></div>
+  <div class="meta">${sig} ${evac} <span class="badge">🕒 ${fmt(snap.published_at||snap.created_at)}</span></div>
+  <p>${(snap.body||'').replace(/\n/g,'<br>')}</p>${snap.image?`<img src="${snap.image}" style="max-width:100%;border-radius:8px;margin-top:8px">`:''}`;
+}
+
+function renderFeed(){
+  if(!currentIncident){feed.innerHTML='<div class="hint">Select an incident.</div>';return;}
+  const f=filterStatus.value;let html='';
+  if(!f||f==='PUBLISHED'){
+    const latestPub=getLatestPublished();
+    html=latestPub?cardHTML(latestPub):'<div class="hint">No live post yet.</div>';
+  }else{
+    let items=db.data.releases.filter(r=>r.incident_id===currentIncident.id&&r.status===f)
+      .sort((a,b)=>new Date(b.published_at||b.created_at)-new Date(a.published_at||a.created_at));
+    html=items.length?items.map(cardHTML).join(''):`<div class="hint">No items with status: ${f}.</div>`;
+  }
+  feed.innerHTML=html;
+}
+
+function cardHTML(p){
+  const cls=p.status==='DRAFT'?'draft':(p.status==='APPROVED'?'approved':'published');
+  const sig=p.is_official?`<span class="badge">✅ Verified — ${p.signer}</span>`:`<span class="badge">Unverified</span>`;
+  const evac=p.evac?`<span class="badge" style="border-color:#704f1e;color:#ffd28a;background:#231a0d">🚨 ${p.evac}</span>`:'';
+  return `<div class="card"><div class="meta" style="justify-content:space-between"><b>${p.title}</b><span class="status ${cls}">${p.status}</span></div>
+  <div class="meta">${sig} ${evac} <span class="badge">🕒 ${fmt(p.published_at||p.created_at)}</span></div>
+  <p>${(p.body||'').replace(/\n/g,'<br>')}</p>${p.image?`<img src="${p.image}" style="max-width:100%;border-radius:8px;margin-top:8px">`:''}</div>`;
+}
+
+// === Incident Manager logic ===
+$("#manageIncidents").addEventListener('click',()=>{openIncidentManager();});
+closeMgrBtn.addEventListener('click',()=>managerBackdrop.style.display='none');
+managerBackdrop.addEventListener('click',e=>{ if(e.target===managerBackdrop) managerBackdrop.style.display='none'; });
+addIncidentInMgrBtn.addEventListener('click',()=>{
+  const name=prompt('Incident name'); if(!name) return;
+  const num=prompt('Incident number (e.g., WA-XXXX)')||('EX-'+Date.now());
+  const i={id:uid('inc'),name,number:num,status:'ACTIVE',created_at:nowISO()};
+  db.data.incidents.unshift(i); if(!safeSave()) return; currentIncident=i; g(i.id).canPublish=false; imgData=null; refreshAll(); renderManagerRows();
+});
+
+mgrSearch.addEventListener('input',renderManagerRows);
+
+function openIncidentManager(){
+  managerBackdrop.style.display='flex';
+  renderManagerRows();
+}
+
+function renderManagerRows(){
+  const q=(mgrSearch.value||'').toLowerCase();
+  const list = db.data.incidents.filter(i=>!q||i.name.toLowerCase().includes(q)||i.number.toLowerCase().includes(q));
+  mgrTable.innerHTML = list.map(i=>{
+    const activeSel = i.status==='ACTIVE' ? 'selected' : '';
+    const completeSel = i.status==='COMPLETE' ? 'selected' : '';
+    return `<tr data-id="${i.id}">
+      <td><input class="mgr-name" value="${i.name.replace(/\"/g,'&quot;')}"></td>
+      <td><input class="mgr-num" value="${i.number.replace(/\"/g,'&quot;')}"></td>
+      <td>
+        <select class="mgr-status">
+          <option value="ACTIVE" ${activeSel}>ACTIVE</option>
+          <option value="COMPLETE" ${completeSel}>COMPLETE</option>
+        </select>
+      </td>
+      <td>
+        <div class="row-actions">
+          <button class="mgr-save">Save</button>
+          <button class="mgr-select">Focus</button>
+          <button class="danger mgr-delete">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Wire row actions
+  mgrTable.querySelectorAll('tr').forEach(tr=>{
+    const id=tr.getAttribute('data-id');
+    const nameEl=tr.querySelector('.mgr-name');
+    const numEl=tr.querySelector('.mgr-num');
+    const statusEl=tr.querySelector('.mgr-status');
+    tr.querySelector('.mgr-save').addEventListener('click',()=>{
+      const inc=db.data.incidents.find(x=>x.id===id); if(!inc) return;
+      inc.name = nameEl.value.trim()||inc.name;
+      inc.number = numEl.value.trim()||inc.number;
+      const prevStatus = inc.status;
+      inc.status = statusEl.value;
+      try{db.save();}catch(e){}
+      // If status toggled to COMPLETE and it is the focused incident, keep focused but reflect status
+      if(prevStatus!==inc.status){ statusMsg.textContent = `Incident \"${inc.name}\" set to ${inc.status}.`; }
+      renderIncidents();
+    });
+    tr.querySelector('.mgr-select').addEventListener('click',()=>{
+      const inc=db.data.incidents.find(x=>x.id===id); if(!inc) return;
+      currentIncident=inc; g(inc.id).canPublish=false; imgData=null; refreshAll();
+    });
+    tr.querySelector('.mgr-delete').addEventListener('click',()=>{
+      const inc=db.data.incidents.find(x=>x.id===id); if(!inc) return;
+      if(!confirm(`Delete incident \"${inc.name}\" and all its releases?`)) return;
+      // Remove releases
+      db.data.releases = db.data.releases.filter(r=>r.incident_id!==inc.id);
+      // Remove incident
+      db.data.incidents = db.data.incidents.filter(x=>x.id!==inc.id);
+      try{db.save();}catch(e){}
+      // Reset currentIncident if needed
+      if(currentIncident && currentIncident.id===inc.id){
+        currentIncident = db.data.incidents[0]||null;
+      }
+      refreshAll();
+      renderManagerRows();
+    });
+  });
+
+  $("#mgrHint").textContent = list.length? "": "No incidents matched your filter.";
+}
+
+function refreshAll(){renderIncidents();updateRoleControls();updatePublishAvailability();renderPreview();renderFeed();}
+roleEl.addEventListener('change',()=>{updateRoleControls();updatePublishAvailability();renderPreview();renderFeed();});
+previewStatus.addEventListener('change',()=>{renderPreview();renderFeed();});
+filterStatus.addEventListener('change',renderFeed);
+refreshAll();
+</script>
+</body>
+</html>
